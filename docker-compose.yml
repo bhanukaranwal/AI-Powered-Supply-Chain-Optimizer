@@ -1,0 +1,40 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: supply_chain_api
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    command: uvicorn src.api:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      - data_init
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: supply_chain_ui
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+    command: streamlit run app.py --server.address 0.0.0.0 --server.port 8501
+    depends_on:
+      - backend
+
+  data_init:
+    image: python:3.9-slim
+    container_name: supply_chain_data_init
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: >
+      sh -c "pip install -r requirements.txt &&
+             python -c 'from src.utils import generate_synthetic_sales_data, generate_synthetic_locations;
+                        generate_synthetic_sales_data();
+                        generate_synthetic_locations()'"
