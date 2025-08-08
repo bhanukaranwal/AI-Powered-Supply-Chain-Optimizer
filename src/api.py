@@ -1,5 +1,6 @@
 import logging
 from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from src.data_processing import load_sales_data, load_locations_data
 from src.demand_forecasting import forecast_demand
@@ -13,11 +14,20 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# -------------------
+# Enable CORS
+# -------------------
+origins = ["*"]  # In production, replace with your Streamlit app URL(s)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.get("/forecast")
-async def get_forecast(periods: int = Query(30, ge=1, le=365, description="Future days to forecast")):
-    """
-    Generate demand forecast for the specified period using Prophet.
-    """
+async def get_forecast(periods: int = Query(30, ge=1, le=365)):
     try:
         sales_data = load_sales_data()
         forecast_df = forecast_demand(sales_data, periods)
@@ -29,22 +39,16 @@ async def get_forecast(periods: int = Query(30, ge=1, le=365, description="Futur
 
 @app.get("/optimize_routes")
 async def get_optimized_routes(
-    num_vehicles: int = Query(1, ge=1, le=20, description="Number of delivery vehicles"),
-    vehicle_capacity: int = Query(100, ge=1, description="Max packages per vehicle")
+    num_vehicles: int = Query(1, ge=1, le=20),
+    vehicle_capacity: int = Query(100, ge=1)
 ):
-    """
-    Optimize delivery routes using Google OR-Tools CVRP solver.
-    """
     try:
         locations_df = load_locations_data()
         routes = optimize_routes(locations_df, num_vehicles, vehicle_capacity)
         if routes is None:
             return JSONResponse(status_code=400, content={"error": "No feasible route solution found."})
         
-        route_names = []
-        for route in routes:
-            route_names.append([locations_df.iloc[idx]["name"] for idx in route])
-        
+        route_names = [[locations_df.iloc[idx]["name"] for idx in route] for route in routes]
         return {
             "routes_index": routes,
             "routes_names": route_names
