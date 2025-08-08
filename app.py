@@ -1,75 +1,71 @@
+import os
+import requests
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+
+# Local imports for direct Python calls if running without backend API
 from src.data_processing import load_sales_data, load_locations_data
 from src.demand_forecasting import forecast_demand
 from src.route_optimization import optimize_routes
 
-st.set_page_config(
-    page_title="AI-Powered Supply Chain Optimizer",
-    layout="wide"
-)
+# -------------------
+# Configurable base URL
+# -------------------
+API_URL = os.getenv("API_URL", "http://localhost:8000")  # default when running locally
 
+st.set_page_config(page_title="AI-Powered Supply Chain Optimizer", layout="wide")
 st.title("📦 AI-Powered Supply Chain Optimizer")
 
-# -------------------------------
-# Demand Forecast Section
-# -------------------------------
+# -------------------
+# Demand Forecast via API
+# -------------------
 st.header("📈 Demand Forecasting")
+periods = st.slider("Forecast Periods (Days)", 1, 90, 30)
 
-try:
-    sales_data = load_sales_data()
-    periods = st.slider("Forecast Periods (Days)", min_value=1, max_value=90, value=30, step=1)
-    forecast = forecast_demand(sales_data, periods)
+if st.button("Get Forecast from API"):
+    try:
+        resp = requests.get(f"{API_URL}/forecast", params={"periods": periods})
+        if resp.status_code == 200:
+            forecast = pd.DataFrame(resp.json())
+            sales_data = load_sales_data()
+            
+            fig = px.line(forecast, x="ds", y="yhat", title="Demand Forecast", labels={"yhat": "Predicted Demand"})
+            fig.add_scatter(x=sales_data["ds"], y=sales_data["y"], mode="lines", name="Historical Sales")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.error(f"API Error: {resp.status_code} - {resp.text}")
+    except Exception as e:
+        st.error(f"Request failed: {e}")
 
-    fig = px.line(
-        forecast, x="ds", y="yhat",
-        labels={"ds": "Date", "yhat": "Predicted Demand"},
-        title="Demand Forecast (Prophet)"
-    )
-    fig.add_scatter(
-        x=sales_data["ds"], y=sales_data["y"],
-        mode="lines", name="Historical Sales"
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-except Exception as e:
-    st.error(f"Error loading/forecasting sales data: {e}")
-
-# -------------------------------
-# Delivery Route Optimization Section
-# -------------------------------
+# -------------------
+# Route Optimization via API
+# -------------------
 st.header("🚚 Route Optimization")
+num_vehicles = st.number_input("Number of Vehicles", min_value=1, max_value=10, value=1)
+vehicle_capacity = st.number_input("Vehicle Capacity", min_value=10, max_value=1000, value=100)
 
-try:
-    locations = load_locations_data()
-    num_vehicles = st.number_input("Number of Vehicles", min_value=1, max_value=10, value=1, step=1)
-    vehicle_capacity = st.number_input("Vehicle Capacity", min_value=10, max_value=1000, value=100, step=10)
+if st.button("Optimize Routes via API"):
+    try:
+        resp = requests.get(f"{API_URL}/optimize_routes", params={
+            "num_vehicles": num_vehicles,
+            "vehicle_capacity": vehicle_capacity
+        })
+        if resp.status_code == 200:
+            data = resp.json()
+            st.write("Routes (by location name):")
+            for i, route in enumerate(data["routes_names"]):
+                st.write(f"Vehicle {i+1}: {' → '.join(route)}")
 
-    if st.button("Optimize Routes"):
-        with st.spinner("Optimizing, please wait..."):
-            routes = optimize_routes(locations, num_vehicles, vehicle_capacity)
-
-        if routes:
-            st.subheader("Optimized Routes")
-            for i, route in enumerate(routes):
-                route_names = [locations.iloc[idx]["name"] for idx in route]
-                st.write(f"Vehicle {i + 1}: {' → '.join(route_names)}")
-
-            # Visualize on map
-            fig_map = px.scatter_mapbox(
-                locations, lat="latitude", lon="longitude", hover_name="name",
-                zoom=10, height=500
-            )
-            for route in routes:
+            # Plot map
+            locations = load_locations_data()
+            fig_map = px.scatter_mapbox(locations, lat="latitude", lon="longitude", text="name", zoom=10)
+            for route in data["routes_index"]:
                 route_locs = locations.iloc[route]
-                fig_map.add_scattermapbox(
-                    lat=route_locs["latitude"], lon=route_locs["longitude"],
-                    mode="lines+markers", name=f"Route {routes.index(route) + 1}"
-                )
+                fig_map.add_scattermapbox(lat=route_locs["latitude"], lon=route_locs["longitude"], mode="lines+markers")
             fig_map.update_layout(mapbox_style="open-street-map")
             st.plotly_chart(fig_map, use_container_width=True)
         else:
-            st.warning("No feasible route found for the given parameters.")
-except Exception as e:
-    st.error(f"Error loading or optimizing routes: {e}")
+            st.error(f"API Error: {resp.status_code} - {resp.text}")
+    except Exception as e:
+        st.error(f"Request failed: {e}")
