@@ -56,3 +56,9 @@ async def get_optimized_routes(
     except Exception as e:
         logging.error(f"Error optimizing routes: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint to verify the API is up.
+    """
+    return {"status": "ok"}
